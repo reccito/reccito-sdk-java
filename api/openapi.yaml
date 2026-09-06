@@ -1,0 +1,2521 @@
+openapi: 3.1.0
+info:
+  contact:
+    email: dev-support@reccito.com
+    name: Reccito
+    url: https://reccito.com/support
+  description: |2
+
+    # Reccito API
+
+    A receipt management platform that enables businesses to create, manage, and
+    share digital receipts with customers through QR codes, mobile apps, and web
+    interfaces.
+
+    ## Key Features
+
+    ### 🏢 **Multi-Tenant Architecture**
+    - Organization and store hierarchy
+    - Scoped API access and permissions
+    - Isolated data per organization
+
+    ### 📱 **Digital Receipt Management**
+    - Create and store digital receipts
+    - Generate QR codes for easy customer access
+    - Barcode generation for physical receipts
+    - Time-limited QR codes for security
+
+    ### 🔐 **Authentication & Security**
+    - API key authentication for merchants
+    - JWT token authentication for customers
+    - Phone-based customer verification with SMS
+    - Rate limiting per organization
+    - Permission-based access control
+
+    ## Authentication
+
+    ### Merchant Authentication (API Keys)
+    ```
+    Authorization: Bearer rcp_live_1234567890abcdef
+    ```
+
+    Merchants use API keys to access business endpoints. API keys can be scoped to:
+    - **Organization level**: Access to all stores within organization
+    - **Store level**: Access limited to specific store
+
+    ## Rate Limits
+
+    API requests are rate limited per organization (defaults: 60/minute,
+    1,000/hour, 10,000/day; configurable per organization). Responses include
+    rate limit headers:
+    - `X-RateLimit-Limit-Minute` / `X-RateLimit-Remaining-Minute` / `X-RateLimit-Reset-Minute`
+    - `X-RateLimit-Limit-Hour` / `X-RateLimit-Remaining-Hour` / `X-RateLimit-Reset-Hour`
+
+    ## Error Handling
+
+    The API uses standard HTTP status codes. Error responses use one of two
+    shapes depending on the endpoint — integrators should handle both:
+
+    - `404` and `500` responses use a structured envelope:
+      ```json
+      {
+          "error": {
+              "code": "NOT_FOUND",
+              "message": "The requested resource was not found",
+              "path": "/api/v1/merchant/receipts/abc"
+          }
+      }
+      ```
+    - All other error responses (400, 401, 403, 422, etc.) use FastAPI's default
+      `{"detail": ...}` shape, where `detail` may be a plain string or a
+      structured object depending on the endpoint. For example:
+      ```json
+      { "detail": "No active subscription found." }
+      ```
+      or
+      ```json
+      { "detail": { "code": "free_tier_quota_exceeded", "message": "..." } }
+      ```
+      `422` validation errors follow FastAPI's standard `detail: [...]` array
+      shape (field, message, error type per invalid field).
+
+    ## Pagination
+
+    List endpoints use offset pagination (`page`/`limit` query parameters):
+
+    ```json
+    {
+        "receipts": [...],
+        "total": 150,
+        "page": 1,
+        "limit": 25,
+        "has_next": true,
+        "has_prev": false
+    }
+    ```
+
+    ## Data Formats
+
+    ### Dates and Times
+    Timestamps are ISO 8601. Most are UTC with an explicit offset
+    (`2024-01-15T14:30:00+00:00`); a few older fields may omit the offset —
+    treat any timestamp without one as UTC.
+
+    ### Currency and Amounts
+    Monetary amounts are serialized as **decimal strings** (not numbers), with
+    a separate `currency` field. This avoids floating-point precision loss and
+    keeps every money field consistent across the API:
+    ```json
+    {
+        "total_amount": "12.99",
+        "currency": "GBP"
+    }
+    ```
+    Request bodies still lenient-accept a JSON number for amounts, but the
+    published contract and every response are string-only.
+
+    ### ULIDs
+    Receipt IDs use ULID format for better performance and sortability:
+    ```json
+    "01HZXYZ123456789ABCD"
+    ```
+
+    ## Support
+
+    - **Support**: [dev-support@reccito.com](mailto:dev-support@reccito.com)
+    - **Interactive docs**: [https://api.reccito.com/api/v1/redoc](https://api.reccito.com/api/v1/redoc)
+
+
+
+    This document covers Reccito's public integrations API. Admin and
+    account-internal operations are not included.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  title: Reccito API
+  version: 1.0.0
+servers:
+- description: Production server
+  url: https://api.reccito.com
+tags:
+- description: Merchant receipt operations
+  name: Merchant Receipts
+- description: Merchant store management
+  name: Merchant Stores
+- description: Merchant brand/assets upload and retrieval
+  name: Merchant Assets
+paths:
+  /api/v1/merchant/receipts:
+    get:
+      description: List receipts with filters and pagination.
+      operationId: listReceipts
+      parameters:
+      - explode: true
+        in: query
+        name: page
+        required: false
+        schema:
+          default: 1
+          minimum: 1
+          title: Page
+          type: integer
+        style: form
+      - explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          default: 50
+          maximum: 100
+          minimum: 1
+          title: Limit
+          type: integer
+        style: form
+      - explode: true
+        in: query
+        name: store_id
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: status
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: search
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: sort_by
+        required: false
+        schema:
+          default: created_at
+          title: Sort By
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: sort_order
+        required: false
+        schema:
+          default: desc
+          title: Sort Order
+          type: string
+        style: form
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiptListResponse"
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+          description: Validation Error
+      security:
+      - ApiKeyAuth: []
+      summary: List Receipts
+      tags:
+      - Merchant Receipts
+      x-accepts:
+      - application/json
+    post:
+      description: |-
+        Create a new receipt. Synchronous: the receipt is durably persisted
+        before this returns (see ReceiptService.create_receipt_synchronously).
+        A retry with the same dedupe_key returns the original receipt with 200,
+        not an error (idempotent replay, Stripe-style).
+      operationId: createReceipt
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReceiptCreate"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiptImmediateResponse"
+          description: Successful Response
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiptImmediateResponse"
+          description: "Idempotent replay: a receipt with this organisation + dedupe_key\
+            \ already existed. Returns the original receipt unchanged, not an error."
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+          description: Validation Error
+      security:
+      - ApiKeyAuth: []
+      summary: Create Receipt
+      tags:
+      - Merchant Receipts
+      x-content-type: application/json
+      x-accepts:
+      - application/json
+  /api/v1/merchant/receipts/{receipt_id}:
+    get:
+      description: Get receipt by ID.
+      operationId: getReceipt
+      parameters:
+      - explode: false
+        in: path
+        name: receipt_id
+        required: true
+        schema:
+          title: Receipt Id
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MerchantReceiptResponse"
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+          description: Validation Error
+      security:
+      - ApiKeyAuth: []
+      summary: Get Receipt
+      tags:
+      - Merchant Receipts
+      x-accepts:
+      - application/json
+  /api/v1/merchant/receipts/{receipt_id}/refresh-qr:
+    put:
+      description: Refresh QR code for a receipt.
+      operationId: refreshReceiptQr
+      parameters:
+      - explode: false
+        in: path
+        name: receipt_id
+        required: true
+        schema:
+          title: Receipt Id
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QRRefreshResponse"
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+          description: Validation Error
+      security:
+      - ApiKeyAuth: []
+      summary: Refresh Qr Code
+      tags:
+      - Merchant Receipts
+      x-accepts:
+      - application/json
+  /api/v1/merchant/stores:
+    get:
+      description: |-
+        List all stores for the organisation.
+
+        **Authentication:** Required (Organisation bearer token)
+
+        **Query Parameters:**
+        - `skip`: Number of stores to skip (default: 0)
+        - `limit`: Number of stores to return (default: 100, max: 1000)
+        - `is_active`: Filter by active status (optional)
+        - `q`: Search by store name/code/city/email/phone (optional)
+      operationId: listStores
+      parameters:
+      - explode: true
+        in: query
+        name: skip
+        required: false
+        schema:
+          default: 0
+          minimum: 0
+          title: Skip
+          type: integer
+        style: form
+      - explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          default: 100
+          maximum: 1000
+          minimum: 1
+          title: Limit
+          type: integer
+        style: form
+      - explode: true
+        in: query
+        name: is_active
+        required: false
+        schema:
+          nullable: true
+          type: boolean
+        style: form
+      - explode: true
+        in: query
+        name: q
+        required: false
+        schema:
+          maxLength: 120
+          minLength: 1
+          nullable: true
+          type: string
+        style: form
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreListResponse"
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+          description: Validation Error
+      security:
+      - ApiKeyAuth: []
+      summary: List Stores
+      tags:
+      - Merchant Stores
+      x-accepts:
+      - application/json
+    post:
+      description: |-
+        Create a new store for the organisation.
+
+        **Authentication:** Required (Organisation bearer token)
+      operationId: createStore
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreCreate"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreResponse"
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+          description: Validation Error
+      security:
+      - ApiKeyAuth: []
+      summary: Create Store
+      tags:
+      - Merchant Stores
+      x-content-type: application/json
+      x-accepts:
+      - application/json
+  /api/v1/merchant/stores/{store_id}:
+    get:
+      description: |-
+        Get a specific store by ID.
+
+        **Authentication:** Required (Organisation bearer token)
+
+        **Path Parameters:**
+        - `store_id`: UUID of the store
+      operationId: getStore
+      parameters:
+      - explode: false
+        in: path
+        name: store_id
+        required: true
+        schema:
+          format: uuid
+          title: Store Id
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreResponse"
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+          description: Validation Error
+      security:
+      - ApiKeyAuth: []
+      summary: Get Store
+      tags:
+      - Merchant Stores
+      x-accepts:
+      - application/json
+    put:
+      description: |-
+        Update a store.
+
+        **Authentication:** Required (Organisation bearer token)
+
+        **Path Parameters:**
+        - `store_id`: UUID of the store
+
+        **Request Body:** Updated store fields (all optional)
+      operationId: updateStore
+      parameters:
+      - explode: false
+        in: path
+        name: store_id
+        required: true
+        schema:
+          format: uuid
+          title: Store Id
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreUpdate"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreResponse"
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+          description: Validation Error
+      security:
+      - ApiKeyAuth: []
+      summary: Update Store
+      tags:
+      - Merchant Stores
+      x-content-type: application/json
+      x-accepts:
+      - application/json
+  /api/v1/merchant/stores/{store_id}/stats:
+    get:
+      description: |-
+        Get statistics for a store.
+
+        **Authentication:** Required (Organisation bearer token)
+
+        **Path Parameters:**
+        - `store_id`: UUID of the store
+      operationId: getStoreStats
+      parameters:
+      - explode: false
+        in: path
+        name: store_id
+        required: true
+        schema:
+          format: uuid
+          title: Store Id
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreStatsResponse"
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+          description: Validation Error
+      security:
+      - ApiKeyAuth: []
+      summary: Get Store Stats
+      tags:
+      - Merchant Stores
+      x-accepts:
+      - application/json
+  /api/v1/merchant/assets/upload/logo:
+    post:
+      description: "Upload a logo file for the organisation. Supported formats: JPEG,\
+        \ PNG, WebP, SVG. Max 5MB."
+      operationId: uploadOrganisationLogo
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/Body_uploadOrganisationLogo"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+          description: Validation Error
+      security:
+      - ApiKeyAuth: []
+      summary: Upload organisation logo
+      tags:
+      - Merchant Assets
+      x-content-type: multipart/form-data
+      x-accepts:
+      - application/json
+  /api/v1/merchant/assets/upload/banner:
+    post:
+      description: "Upload a banner file for the organisation. Supported formats:\
+        \ JPEG, PNG, WebP. Max 5MB."
+      operationId: uploadOrganisationBanner
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/Body_uploadOrganisationBanner"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+          description: Validation Error
+      security:
+      - ApiKeyAuth: []
+      summary: Upload organisation banner
+      tags:
+      - Merchant Assets
+      x-content-type: multipart/form-data
+      x-accepts:
+      - application/json
+  /api/v1/merchant/assets/upload/store/logo:
+    post:
+      description: "Upload a logo file for a specific store. Supported formats: JPEG,\
+        \ PNG, WebP, SVG. Max 5MB."
+      operationId: uploadStoreLogo
+      parameters:
+      - explode: true
+        in: query
+        name: store_id
+        required: true
+        schema:
+          title: Store Id
+          type: string
+        style: form
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/Body_uploadStoreLogo"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+          description: Validation Error
+      security:
+      - ApiKeyAuth: []
+      summary: Upload store logo
+      tags:
+      - Merchant Assets
+      x-content-type: multipart/form-data
+      x-accepts:
+      - application/json
+  /api/v1/merchant/assets/list:
+    get:
+      description: List all branding assets uploaded for the organisation.
+      operationId: listOrganisationAssets
+      parameters:
+      - explode: true
+        in: query
+        name: asset_type
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: form
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+          description: Validation Error
+      security:
+      - ApiKeyAuth: []
+      summary: List organisation assets
+      tags:
+      - Merchant Assets
+      x-accepts:
+      - application/json
+components:
+  schemas:
+    ApiResponse:
+      description: |-
+        Standard API response format.
+
+        All API responses should follow this format for consistency.
+        The 'data' field contains the response payload, while 'error'
+        is populated when an error occurs. Pagination is included for list endpoints.
+
+        Example:
+            Success response:
+            {
+                "data": {"id": "123", "name": "Logo"},
+                "pagination": {"page": 1, "limit": 10, "total": 100, "has_next": true}
+            }
+
+            Error response:
+            {
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "File size exceeds 5MB limit",
+                    "details": {"max_size": "5242880"}
+                }
+            }
+      example:
+        data:
+          logo_url: https://example.com/logo.png
+      properties:
+        data:
+          additionalProperties: true
+          description: Response payload data
+          nullable: true
+          type: object
+        error:
+          allOf:
+          - $ref: "#/components/schemas/ErrorDetail"
+          description: Error information
+          nullable: true
+        pagination:
+          allOf:
+          - $ref: "#/components/schemas/PaginationInfo"
+          description: Pagination information for list responses
+          nullable: true
+      title: ApiResponse
+    Barcode:
+      description: |-
+        Barcode. Used both as the request shape (ReceiptCreate.barcode) and the
+        response shape (see MerchantReceiptResponse/CustomerReceiptDetailResponse/
+        ReceiptImmediateResponse.barcode). `code` is required: a Barcode object
+        with no code is meaningless.
+      properties:
+        code:
+          maxLength: 100
+          minLength: 1
+          title: Code
+          type: string
+        format:
+          maxLength: 20
+          nullable: true
+          type: string
+      required:
+      - code
+      title: Barcode
+    Body_uploadOrganisationBanner:
+      properties:
+        file:
+          description: Banner file to upload
+          format: binary
+          title: File
+          type: string
+      required:
+      - file
+      title: Body_uploadOrganisationBanner
+    Body_uploadOrganisationLogo:
+      properties:
+        file:
+          description: Logo file to upload
+          format: binary
+          title: File
+          type: string
+      required:
+      - file
+      title: Body_uploadOrganisationLogo
+    Body_uploadStoreLogo:
+      properties:
+        file:
+          description: Store logo file to upload
+          format: binary
+          title: File
+          type: string
+      required:
+      - file
+      title: Body_uploadStoreLogo
+    ErrorDetail:
+      description: Standard error detail response.
+      properties:
+        code:
+          description: Error code identifier
+          title: Code
+          type: string
+        message:
+          description: Human-readable error message
+          title: Message
+          type: string
+        details:
+          additionalProperties: true
+          description: Additional error details
+          nullable: true
+          type: object
+      required:
+      - code
+      - message
+      title: ErrorDetail
+    HTTPValidationError:
+      example:
+        detail:
+        - loc:
+          - Location_inner
+          - Location_inner
+          msg: msg
+          type: type
+          input: ""
+          ctx: "{}"
+        - loc:
+          - Location_inner
+          - Location_inner
+          msg: msg
+          type: type
+          input: ""
+          ctx: "{}"
+      properties:
+        detail:
+          items:
+            $ref: "#/components/schemas/ValidationError"
+          title: Detail
+          type: array
+          default: null
+      title: HTTPValidationError
+    MerchantDetails:
+      description: Merchant details parsed from receipt.
+      properties:
+        name:
+          maxLength: 255
+          nullable: true
+          type: string
+        address:
+          maxLength: 500
+          nullable: true
+          type: string
+        tax_id:
+          maxLength: 100
+          nullable: true
+          type: string
+        contact_phone:
+          maxLength: 50
+          nullable: true
+          type: string
+        contact_email:
+          maxLength: 255
+          nullable: true
+          type: string
+        website:
+          maxLength: 255
+          nullable: true
+          type: string
+      title: MerchantDetails
+    MerchantReceiptResponse:
+      description: |-
+        Receipt response for the merchant audience (dashboard, merchant API keys).
+
+        Excludes customer-upload-pipeline fields (uploaded_file_url, file_size,
+        file_type, original_filename, extraction_status/confidence/method/
+        completed_at, receipt_source, uploaded_by_customer_id), which are
+        always null for merchant-issued receipts and belong to the separate
+        customer-audience response shape instead.
+      example:
+        id: id
+        public_token: public_token
+        barcode: ""
+        merchant_receipt_id: merchant_receipt_id
+        merchant_name: merchant_name
+        merchant_logo: merchant_logo
+        store_id: store_id
+        organisation_id: organisation_id
+        transaction_date: 2000-01-23T04:56:07.000+00:00
+        order_number: order_number
+        cashier: cashier
+        items:
+        - name: name
+          quantity: 0
+          unit_price: "12.99"
+          total_price: "12.99"
+          description: description
+          sku: sku
+          category: category
+        - name: name
+          quantity: 0
+          unit_price: "12.99"
+          total_price: "12.99"
+          description: description
+          sku: sku
+          category: category
+        subtotal: "12.99"
+        tax_amount: "12.99"
+        discount_amount: "12.99"
+        tip_amount: "12.99"
+        total_amount: "12.99"
+        currency: currency
+        payment_info:
+        - method: method
+          amount: "12.99"
+          card_last_four: card_last_four
+          reference: reference
+        - method: method
+          amount: "12.99"
+          card_last_four: card_last_four
+          reference: reference
+        qr_code_url: qr_code_url
+        qr_token: qr_token
+        qr_expires_at: 2000-01-23T04:56:07.000+00:00
+        receipt_url: receipt_url
+        pdf_url: pdf_url
+        notes: notes
+        return_policy: return_policy
+        offers:
+        - offers
+        - offers
+        offer_policies:
+        - offer_text: offer_text
+          offer_end_date: 2000-01-23T04:56:07.000+00:00
+          terms: terms
+        - offer_text: offer_text
+          offer_end_date: 2000-01-23T04:56:07.000+00:00
+          terms: terms
+        feedback_url: feedback_url
+        loyalty_info: loyalty_info
+        merchant_details: ""
+        adjustments:
+        - scope: receipt
+          kind: kind
+          label: label
+          amount: "12.99"
+          item_name: item_name
+        - scope: receipt
+          kind: kind
+          label: label
+          amount: "12.99"
+          item_name: item_name
+        transaction_references:
+        - key: key
+          value: value
+        - key: key
+          value: value
+        warranties:
+        - item_name: item_name
+          warranty_terms: warranty_terms
+          warranty_end_date: 2000-01-23T04:56:07.000+00:00
+          reference: reference
+        - item_name: item_name
+          warranty_terms: warranty_terms
+          warranty_end_date: 2000-01-23T04:56:07.000+00:00
+          reference: reference
+        insights: ""
+        return_insights: ""
+        access_count: 6
+        last_accessed: 2000-01-23T04:56:07.000+00:00
+        status: status
+        expires_at: 2000-01-23T04:56:07.000+00:00
+        created_at: 2000-01-23T04:56:07.000+00:00
+        updated_at: 2000-01-23T04:56:07.000+00:00
+      properties:
+        id:
+          title: Id
+          type: string
+        public_token:
+          title: Public Token
+          type: string
+        barcode:
+          allOf:
+          - $ref: "#/components/schemas/Barcode"
+          nullable: true
+        merchant_receipt_id:
+          nullable: true
+          type: string
+        merchant_name:
+          nullable: true
+          type: string
+        merchant_logo:
+          nullable: true
+          type: string
+        store_id:
+          title: Store Id
+          type: string
+        organisation_id:
+          title: Organisation Id
+          type: string
+        transaction_date:
+          format: date-time
+          title: Transaction Date
+          type: string
+        order_number:
+          nullable: true
+          type: string
+        cashier:
+          nullable: true
+          type: string
+        items:
+          items:
+            $ref: "#/components/schemas/ReceiptItemResponse"
+          title: Items
+          type: array
+          default: null
+        subtotal:
+          example: "12.99"
+          title: Subtotal
+          type: string
+        tax_amount:
+          example: "12.99"
+          title: Tax Amount
+          type: string
+        discount_amount:
+          example: "12.99"
+          title: Discount Amount
+          type: string
+        tip_amount:
+          example: "12.99"
+          title: Tip Amount
+          type: string
+        total_amount:
+          example: "12.99"
+          title: Total Amount
+          type: string
+        currency:
+          title: Currency
+          type: string
+        payment_info:
+          items:
+            $ref: "#/components/schemas/PaymentInfoResponse"
+          title: Payment Info
+          type: array
+          default: null
+        qr_code_url:
+          title: Qr Code Url
+          type: string
+        qr_token:
+          title: Qr Token
+          type: string
+        qr_expires_at:
+          format: date-time
+          nullable: true
+          type: string
+        receipt_url:
+          title: Receipt Url
+          type: string
+        pdf_url:
+          nullable: true
+          type: string
+        notes:
+          nullable: true
+          type: string
+        return_policy:
+          nullable: true
+          type: string
+        offers:
+          items:
+            type: string
+          nullable: true
+          type: array
+          default: null
+        offer_policies:
+          items:
+            $ref: "#/components/schemas/OfferPolicyInfo"
+          title: Offer Policies
+          type: array
+          default: null
+        feedback_url:
+          nullable: true
+          type: string
+        loyalty_info:
+          nullable: true
+          type: string
+        merchant_details:
+          allOf:
+          - $ref: "#/components/schemas/MerchantDetails"
+          nullable: true
+        adjustments:
+          items:
+            $ref: "#/components/schemas/ReceiptAdjustment"
+          title: Adjustments
+          type: array
+          default: null
+        transaction_references:
+          items:
+            $ref: "#/components/schemas/TransactionReference"
+          title: Transaction References
+          type: array
+          default: null
+        warranties:
+          items:
+            $ref: "#/components/schemas/WarrantyInfo"
+          title: Warranties
+          type: array
+          default: null
+        insights:
+          allOf:
+          - $ref: "#/components/schemas/ReceiptInsights"
+          nullable: true
+        return_insights:
+          allOf:
+          - $ref: "#/components/schemas/ReturnInsights"
+          nullable: true
+        access_count:
+          title: Access Count
+          type: integer
+        last_accessed:
+          format: date-time
+          nullable: true
+          type: string
+        status:
+          title: Status
+          type: string
+        expires_at:
+          format: date-time
+          nullable: true
+          type: string
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+      required:
+      - access_count
+      - created_at
+      - currency
+      - discount_amount
+      - id
+      - items
+      - organisation_id
+      - payment_info
+      - public_token
+      - qr_code_url
+      - qr_expires_at
+      - qr_token
+      - receipt_url
+      - status
+      - store_id
+      - subtotal
+      - tax_amount
+      - tip_amount
+      - total_amount
+      - transaction_date
+      - updated_at
+      title: MerchantReceiptResponse
+    OfferPolicyInfo:
+      description: Offer metadata with optional validity window.
+      example:
+        offer_text: offer_text
+        offer_end_date: 2000-01-23T04:56:07.000+00:00
+        terms: terms
+      properties:
+        offer_text:
+          maxLength: 500
+          minLength: 1
+          title: Offer Text
+          type: string
+        offer_end_date:
+          format: date-time
+          nullable: true
+          type: string
+        terms:
+          maxLength: 500
+          nullable: true
+          type: string
+      required:
+      - offer_text
+      title: OfferPolicyInfo
+    PaginationInfo:
+      description: Pagination information for list responses.
+      properties:
+        page:
+          description: Current page number
+          minimum: 1.0
+          title: Page
+          type: integer
+        limit:
+          description: Items per page
+          minimum: 1.0
+          title: Limit
+          type: integer
+        total:
+          description: Total number of items
+          minimum: 0.0
+          title: Total
+          type: integer
+        has_next:
+          description: Whether there is a next page
+          title: Has Next
+          type: boolean
+      required:
+      - has_next
+      - limit
+      - page
+      - total
+      title: PaginationInfo
+    PaymentInfoCreate:
+      description: Payment information.
+      example:
+        method: method
+        amount: "12.99"
+        card_last_four: card_last_four
+        reference: reference
+      properties:
+        method:
+          maxLength: 50
+          minLength: 1
+          title: Method
+          type: string
+        amount:
+          example: "12.99"
+          title: Amount
+          type: string
+        card_last_four:
+          nullable: true
+          pattern: "^[0-9]{4}$"
+          type: string
+        reference:
+          maxLength: 100
+          nullable: true
+          type: string
+      required:
+      - amount
+      - method
+      title: PaymentInfoCreate
+    PaymentInfoResponse:
+      description: Payment information response.
+      example:
+        method: method
+        amount: "12.99"
+        card_last_four: card_last_four
+        reference: reference
+      properties:
+        method:
+          title: Method
+          type: string
+        amount:
+          example: "12.99"
+          title: Amount
+          type: string
+        card_last_four:
+          nullable: true
+          type: string
+        reference:
+          nullable: true
+          type: string
+      required:
+      - amount
+      - method
+      title: PaymentInfoResponse
+    QRRefreshResponse:
+      description: QR code refresh response.
+      example:
+        receipt_id: receipt_id
+        new_qr_token: new_qr_token
+        new_qr_code_url: new_qr_code_url
+        expires_at: 2000-01-23T04:56:07.000+00:00
+      properties:
+        receipt_id:
+          title: Receipt Id
+          type: string
+        new_qr_token:
+          title: New Qr Token
+          type: string
+        new_qr_code_url:
+          title: New Qr Code Url
+          type: string
+        expires_at:
+          format: date-time
+          title: Expires At
+          type: string
+      required:
+      - expires_at
+      - new_qr_code_url
+      - new_qr_token
+      - receipt_id
+      title: QRRefreshResponse
+    ReceiptAdjustment:
+      description: Price adjustment on line-item or receipt total.
+      example:
+        scope: receipt
+        kind: kind
+        label: label
+        amount: "12.99"
+        item_name: item_name
+      properties:
+        scope:
+          default: receipt
+          pattern: ^(receipt|item)$
+          title: Scope
+          type: string
+        kind:
+          pattern: ^(discount|promotion|deduction|addition|tax|fee|tip|other)$
+          title: Kind
+          type: string
+        label:
+          maxLength: 120
+          nullable: true
+          type: string
+        amount:
+          example: "12.99"
+          title: Amount
+          type: string
+        item_name:
+          maxLength: 255
+          nullable: true
+          type: string
+      required:
+      - amount
+      - kind
+      title: ReceiptAdjustment
+    ReceiptCreate:
+      description: Receipt creation request.
+      example:
+        merchant_receipt_id: merchant_receipt_id
+        dedupe_key: dedupe_key
+        barcode: ""
+        store_id: store_id
+        transaction_date: 2000-01-23T04:56:07.000+00:00
+        order_number: order_number
+        cashier: cashier
+        items:
+        - name: name
+          quantity: 1
+          unit_price: "12.99"
+          total_price: "12.99"
+          description: description
+          sku: sku
+          category: category
+        - name: name
+          quantity: 1
+          unit_price: "12.99"
+          total_price: "12.99"
+          description: description
+          sku: sku
+          category: category
+        subtotal: "12.99"
+        tax_amount: "12.99"
+        discount_amount: "12.99"
+        tip_amount: "12.99"
+        total_amount: "12.99"
+        currency: currency
+        payment_info:
+        - method: method
+          amount: "12.99"
+          card_last_four: card_last_four
+          reference: reference
+        - method: method
+          amount: "12.99"
+          card_last_four: card_last_four
+          reference: reference
+        notes: notes
+        return_policy: return_policy
+        offers:
+        - offers
+        - offers
+        offer_policies:
+        - offer_text: offer_text
+          offer_end_date: 2000-01-23T04:56:07.000+00:00
+          terms: terms
+        - offer_text: offer_text
+          offer_end_date: 2000-01-23T04:56:07.000+00:00
+          terms: terms
+        feedback_url: feedback_url
+        loyalty_info: loyalty_info
+        merchant_details: ""
+        adjustments:
+        - scope: receipt
+          kind: kind
+          label: label
+          amount: "12.99"
+          item_name: item_name
+        - scope: receipt
+          kind: kind
+          label: label
+          amount: "12.99"
+          item_name: item_name
+        transaction_references:
+        - key: key
+          value: value
+        - key: key
+          value: value
+        warranties:
+        - item_name: item_name
+          warranty_terms: warranty_terms
+          warranty_end_date: 2000-01-23T04:56:07.000+00:00
+          reference: reference
+        - item_name: item_name
+          warranty_terms: warranty_terms
+          warranty_end_date: 2000-01-23T04:56:07.000+00:00
+          reference: reference
+        insights: ""
+        return_insights: ""
+        qr_expiry_minutes: 868
+      properties:
+        merchant_receipt_id:
+          maxLength: 255
+          nullable: true
+          type: string
+        dedupe_key:
+          maxLength: 255
+          nullable: true
+          type: string
+        barcode:
+          allOf:
+          - $ref: "#/components/schemas/Barcode"
+          nullable: true
+        store_id:
+          nullable: true
+          type: string
+        transaction_date:
+          format: date-time
+          title: Transaction Date
+          type: string
+        order_number:
+          maxLength: 100
+          nullable: true
+          type: string
+        cashier:
+          maxLength: 100
+          nullable: true
+          type: string
+        items:
+          items:
+            $ref: "#/components/schemas/ReceiptItemCreate"
+          minItems: 1
+          title: Items
+          type: array
+          default: null
+        subtotal:
+          example: "12.99"
+          title: Subtotal
+          type: string
+        tax_amount:
+          example: "12.99"
+          title: Tax Amount
+          type: string
+        discount_amount:
+          default: "0"
+          example: "12.99"
+          title: Discount Amount
+          type: string
+        tip_amount:
+          default: "0"
+          example: "12.99"
+          title: Tip Amount
+          type: string
+        total_amount:
+          example: "12.99"
+          title: Total Amount
+          type: string
+        currency:
+          pattern: "^[A-Z]{3}$"
+          title: Currency
+          type: string
+        payment_info:
+          items:
+            $ref: "#/components/schemas/PaymentInfoCreate"
+          minItems: 1
+          title: Payment Info
+          type: array
+          default: null
+        notes:
+          maxLength: 1000
+          nullable: true
+          type: string
+        return_policy:
+          maxLength: 500
+          nullable: true
+          type: string
+        offers:
+          items:
+            type: string
+          nullable: true
+          type: array
+          default: null
+        offer_policies:
+          items:
+            $ref: "#/components/schemas/OfferPolicyInfo"
+          title: Offer Policies
+          type: array
+          default: null
+        feedback_url:
+          nullable: true
+          type: string
+        loyalty_info:
+          maxLength: 200
+          nullable: true
+          type: string
+        merchant_details:
+          allOf:
+          - $ref: "#/components/schemas/MerchantDetails"
+          nullable: true
+        adjustments:
+          items:
+            $ref: "#/components/schemas/ReceiptAdjustment"
+          title: Adjustments
+          type: array
+          default: null
+        transaction_references:
+          items:
+            $ref: "#/components/schemas/TransactionReference"
+          title: Transaction References
+          type: array
+          default: null
+        warranties:
+          items:
+            $ref: "#/components/schemas/WarrantyInfo"
+          title: Warranties
+          type: array
+          default: null
+        insights:
+          allOf:
+          - $ref: "#/components/schemas/ReceiptInsights"
+          nullable: true
+        return_insights:
+          allOf:
+          - $ref: "#/components/schemas/ReturnInsights"
+          nullable: true
+        qr_expiry_minutes:
+          maximum: 1440.0
+          minimum: 1.0
+          nullable: true
+          type: integer
+      required:
+      - currency
+      - items
+      - payment_info
+      - subtotal
+      - tax_amount
+      - total_amount
+      - transaction_date
+      title: ReceiptCreate
+    ReceiptImmediateResponse:
+      description: Immediate receipt response for fast QR code generation.
+      example:
+        id: id
+        public_token: public_token
+        barcode: ""
+        merchant_receipt_id: merchant_receipt_id
+        store_id: store_id
+        organisation_id: organisation_id
+        qr_code_url: qr_code_url
+        qr_token: qr_token
+        qr_expires_at: 2000-01-23T04:56:07.000+00:00
+        receipt_url: receipt_url
+        transaction_date: 2000-01-23T04:56:07.000+00:00
+        total_amount: "12.99"
+        currency: currency
+        processing_status: processing
+        created_at: 2000-01-23T04:56:07.000+00:00
+      properties:
+        id:
+          title: Id
+          type: string
+        public_token:
+          title: Public Token
+          type: string
+        barcode:
+          allOf:
+          - $ref: "#/components/schemas/Barcode"
+          nullable: true
+        merchant_receipt_id:
+          nullable: true
+          type: string
+        store_id:
+          title: Store Id
+          type: string
+        organisation_id:
+          title: Organisation Id
+          type: string
+        qr_code_url:
+          title: Qr Code Url
+          type: string
+        qr_token:
+          title: Qr Token
+          type: string
+        qr_expires_at:
+          format: date-time
+          nullable: true
+          type: string
+        receipt_url:
+          title: Receipt Url
+          type: string
+        transaction_date:
+          format: date-time
+          title: Transaction Date
+          type: string
+        total_amount:
+          example: "12.99"
+          title: Total Amount
+          type: string
+        currency:
+          title: Currency
+          type: string
+        processing_status:
+          default: processing
+          title: Processing Status
+          type: string
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+      required:
+      - created_at
+      - currency
+      - id
+      - organisation_id
+      - public_token
+      - qr_code_url
+      - qr_expires_at
+      - qr_token
+      - receipt_url
+      - store_id
+      - total_amount
+      - transaction_date
+      title: ReceiptImmediateResponse
+    ReceiptInsights:
+      description: Actionable insights derived from receipt text.
+      properties:
+        return_window_days:
+          maximum: 3650.0
+          minimum: 0.0
+          nullable: true
+          type: integer
+        return_deadline:
+          format: date-time
+          nullable: true
+          type: string
+        refund_eligible:
+          nullable: true
+          type: boolean
+        warranty_items:
+          items:
+            $ref: "#/components/schemas/WarrantyInfo"
+          title: Warranty Items
+          type: array
+          default: null
+      title: ReceiptInsights
+    ReceiptItemCreate:
+      description: Receipt line item creation.
+      example:
+        name: name
+        quantity: 1
+        unit_price: "12.99"
+        total_price: "12.99"
+        description: description
+        sku: sku
+        category: category
+      properties:
+        name:
+          maxLength: 255
+          minLength: 1
+          title: Name
+          type: string
+        quantity:
+          minimum: 1.0
+          title: Quantity
+          type: integer
+        unit_price:
+          example: "12.99"
+          title: Unit Price
+          type: string
+        total_price:
+          example: "12.99"
+          title: Total Price
+          type: string
+        description:
+          maxLength: 500
+          nullable: true
+          type: string
+        sku:
+          maxLength: 100
+          nullable: true
+          type: string
+        category:
+          maxLength: 100
+          nullable: true
+          type: string
+      required:
+      - name
+      - quantity
+      - total_price
+      - unit_price
+      title: ReceiptItemCreate
+    ReceiptItemResponse:
+      description: Receipt line item response.
+      example:
+        name: name
+        quantity: 0
+        unit_price: "12.99"
+        total_price: "12.99"
+        description: description
+        sku: sku
+        category: category
+      properties:
+        name:
+          title: Name
+          type: string
+        quantity:
+          title: Quantity
+          type: integer
+        unit_price:
+          example: "12.99"
+          title: Unit Price
+          type: string
+        total_price:
+          example: "12.99"
+          title: Total Price
+          type: string
+        description:
+          nullable: true
+          type: string
+        sku:
+          nullable: true
+          type: string
+        category:
+          nullable: true
+          type: string
+      required:
+      - name
+      - quantity
+      - total_price
+      - unit_price
+      title: ReceiptItemResponse
+    ReceiptListResponse:
+      description: Receipt list response with pagination (merchant audience).
+      example:
+        receipts:
+        - id: id
+          public_token: public_token
+          merchant_receipt_id: merchant_receipt_id
+          store_id: store_id
+          organisation_id: organisation_id
+          transaction_date: 2000-01-23T04:56:07.000+00:00
+          total_amount: "12.99"
+          currency: currency
+          item_count: 0
+          status: status
+          access_count: 6
+          receipt_url: receipt_url
+          created_at: 2000-01-23T04:56:07.000+00:00
+        - id: id
+          public_token: public_token
+          merchant_receipt_id: merchant_receipt_id
+          store_id: store_id
+          organisation_id: organisation_id
+          transaction_date: 2000-01-23T04:56:07.000+00:00
+          total_amount: "12.99"
+          currency: currency
+          item_count: 0
+          status: status
+          access_count: 6
+          receipt_url: receipt_url
+          created_at: 2000-01-23T04:56:07.000+00:00
+        total: 1
+        page: 5
+        limit: 5
+        has_next: true
+        has_prev: true
+      properties:
+        receipts:
+          items:
+            $ref: "#/components/schemas/ReceiptSummary"
+          title: Receipts
+          type: array
+          default: null
+        total:
+          title: Total
+          type: integer
+        page:
+          title: Page
+          type: integer
+        limit:
+          title: Limit
+          type: integer
+        has_next:
+          title: Has Next
+          type: boolean
+        has_prev:
+          title: Has Prev
+          type: boolean
+      required:
+      - has_next
+      - has_prev
+      - limit
+      - page
+      - receipts
+      - total
+      title: ReceiptListResponse
+    ReceiptSummary:
+      description: |-
+        Slim receipt shape for the paginated merchant list endpoint -- omits
+        qr_code_url, items, payment_info, adjustments, warranties, and insights
+        to keep list responses lightweight. Fetch GET /merchant/receipts/{id}
+        for the full detail (QR code included) when a single receipt is opened.
+      example:
+        id: id
+        public_token: public_token
+        merchant_receipt_id: merchant_receipt_id
+        store_id: store_id
+        organisation_id: organisation_id
+        transaction_date: 2000-01-23T04:56:07.000+00:00
+        total_amount: "12.99"
+        currency: currency
+        item_count: 0
+        status: status
+        access_count: 6
+        receipt_url: receipt_url
+        created_at: 2000-01-23T04:56:07.000+00:00
+      properties:
+        id:
+          title: Id
+          type: string
+        public_token:
+          title: Public Token
+          type: string
+        merchant_receipt_id:
+          nullable: true
+          type: string
+        store_id:
+          title: Store Id
+          type: string
+        organisation_id:
+          title: Organisation Id
+          type: string
+        transaction_date:
+          format: date-time
+          title: Transaction Date
+          type: string
+        total_amount:
+          example: "12.99"
+          title: Total Amount
+          type: string
+        currency:
+          title: Currency
+          type: string
+        item_count:
+          title: Item Count
+          type: integer
+        status:
+          title: Status
+          type: string
+        access_count:
+          title: Access Count
+          type: integer
+        receipt_url:
+          title: Receipt Url
+          type: string
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+      required:
+      - access_count
+      - created_at
+      - currency
+      - id
+      - item_count
+      - organisation_id
+      - public_token
+      - receipt_url
+      - status
+      - store_id
+      - total_amount
+      - transaction_date
+      title: ReceiptSummary
+    ReturnInsights:
+      description: Return-centric actionable insights.
+      properties:
+        returnable:
+          nullable: true
+          type: boolean
+        return_window_days:
+          maximum: 3650.0
+          minimum: 0.0
+          nullable: true
+          type: integer
+        return_deadline:
+          format: date-time
+          nullable: true
+          type: string
+        days_left:
+          nullable: true
+          type: integer
+        policy_summary:
+          maxLength: 500
+          nullable: true
+          type: string
+      title: ReturnInsights
+    StoreCreate:
+      description: Store creation request.
+      example:
+        name: name
+        code: code
+        description: description
+        address_line_1: address_line_1
+        address_line_2: address_line_2
+        city: city
+        state: state
+        postal_code: postal_code
+        country: US
+        latitude: latitude
+        longitude: longitude
+        phone: phone
+        email: email
+        manager_name: manager_name
+        timezone: timezone
+        default_qr_expiry_minutes: 116
+        logo_url: logo_url
+        primary_color: primary_color
+        opening_hours:
+          key: ""
+        custom_metadata:
+          key: ""
+      properties:
+        name:
+          maxLength: 255
+          minLength: 1
+          title: Name
+          type: string
+        code:
+          maxLength: 50
+          minLength: 1
+          title: Code
+          type: string
+        description:
+          maxLength: 1000
+          nullable: true
+          type: string
+        address_line_1:
+          maxLength: 255
+          nullable: true
+          type: string
+        address_line_2:
+          maxLength: 255
+          nullable: true
+          type: string
+        city:
+          maxLength: 100
+          nullable: true
+          type: string
+        state:
+          maxLength: 100
+          nullable: true
+          type: string
+        postal_code:
+          maxLength: 20
+          nullable: true
+          type: string
+        country:
+          default: US
+          maxLength: 2
+          title: Country
+          type: string
+        latitude:
+          nullable: true
+          type: string
+        longitude:
+          nullable: true
+          type: string
+        phone:
+          nullable: true
+          type: string
+        email:
+          nullable: true
+          type: string
+        manager_name:
+          maxLength: 255
+          nullable: true
+          type: string
+        timezone:
+          nullable: true
+          type: string
+        default_qr_expiry_minutes:
+          maximum: 1440.0
+          minimum: 1.0
+          nullable: true
+          type: integer
+        logo_url:
+          nullable: true
+          type: string
+        primary_color:
+          nullable: true
+          type: string
+        opening_hours:
+          additionalProperties: true
+          nullable: true
+          type: object
+        custom_metadata:
+          additionalProperties: true
+          nullable: true
+          type: object
+      required:
+      - code
+      - name
+      title: StoreCreate
+    StoreListResponse:
+      description: Store list response.
+      example:
+        stores:
+        - id: id
+          name: name
+          code: code
+          description: description
+          organisation_id: organisation_id
+          address_line_1: address_line_1
+          address_line_2: address_line_2
+          city: city
+          state: state
+          postal_code: postal_code
+          country: country
+          full_address: full_address
+          latitude: latitude
+          longitude: longitude
+          phone: phone
+          email: email
+          manager_name: manager_name
+          timezone: timezone
+          default_qr_expiry_minutes: 0
+          effective_qr_expiry: 6
+          logo_url: logo_url
+          primary_color: primary_color
+          effective_logo_url: effective_logo_url
+          effective_primary_color: effective_primary_color
+          is_active: true
+          opening_hours:
+            key: ""
+          receipts_created_count: 1
+          last_receipt_created: 2000-01-23T04:56:07.000+00:00
+          custom_metadata:
+            key: ""
+          created_at: 2000-01-23T04:56:07.000+00:00
+          updated_at: 2000-01-23T04:56:07.000+00:00
+        - id: id
+          name: name
+          code: code
+          description: description
+          organisation_id: organisation_id
+          address_line_1: address_line_1
+          address_line_2: address_line_2
+          city: city
+          state: state
+          postal_code: postal_code
+          country: country
+          full_address: full_address
+          latitude: latitude
+          longitude: longitude
+          phone: phone
+          email: email
+          manager_name: manager_name
+          timezone: timezone
+          default_qr_expiry_minutes: 0
+          effective_qr_expiry: 6
+          logo_url: logo_url
+          primary_color: primary_color
+          effective_logo_url: effective_logo_url
+          effective_primary_color: effective_primary_color
+          is_active: true
+          opening_hours:
+            key: ""
+          receipts_created_count: 1
+          last_receipt_created: 2000-01-23T04:56:07.000+00:00
+          custom_metadata:
+            key: ""
+          created_at: 2000-01-23T04:56:07.000+00:00
+          updated_at: 2000-01-23T04:56:07.000+00:00
+        total: 5
+      properties:
+        stores:
+          items:
+            $ref: "#/components/schemas/StoreResponse"
+          title: Stores
+          type: array
+          default: null
+        total:
+          title: Total
+          type: integer
+      required:
+      - stores
+      - total
+      title: StoreListResponse
+    StoreResponse:
+      description: Store response.
+      example:
+        id: id
+        name: name
+        code: code
+        description: description
+        organisation_id: organisation_id
+        address_line_1: address_line_1
+        address_line_2: address_line_2
+        city: city
+        state: state
+        postal_code: postal_code
+        country: country
+        full_address: full_address
+        latitude: latitude
+        longitude: longitude
+        phone: phone
+        email: email
+        manager_name: manager_name
+        timezone: timezone
+        default_qr_expiry_minutes: 0
+        effective_qr_expiry: 6
+        logo_url: logo_url
+        primary_color: primary_color
+        effective_logo_url: effective_logo_url
+        effective_primary_color: effective_primary_color
+        is_active: true
+        opening_hours:
+          key: ""
+        receipts_created_count: 1
+        last_receipt_created: 2000-01-23T04:56:07.000+00:00
+        custom_metadata:
+          key: ""
+        created_at: 2000-01-23T04:56:07.000+00:00
+        updated_at: 2000-01-23T04:56:07.000+00:00
+      properties:
+        id:
+          title: Id
+          type: string
+        name:
+          title: Name
+          type: string
+        code:
+          title: Code
+          type: string
+        description:
+          nullable: true
+          type: string
+        organisation_id:
+          title: Organisation Id
+          type: string
+        address_line_1:
+          nullable: true
+          type: string
+        address_line_2:
+          nullable: true
+          type: string
+        city:
+          nullable: true
+          type: string
+        state:
+          nullable: true
+          type: string
+        postal_code:
+          nullable: true
+          type: string
+        country:
+          title: Country
+          type: string
+        full_address:
+          title: Full Address
+          type: string
+        latitude:
+          nullable: true
+          type: string
+        longitude:
+          nullable: true
+          type: string
+        phone:
+          nullable: true
+          type: string
+        email:
+          nullable: true
+          type: string
+        manager_name:
+          nullable: true
+          type: string
+        timezone:
+          nullable: true
+          type: string
+        default_qr_expiry_minutes:
+          nullable: true
+          type: integer
+        effective_qr_expiry:
+          title: Effective Qr Expiry
+          type: integer
+        logo_url:
+          nullable: true
+          type: string
+        primary_color:
+          nullable: true
+          type: string
+        effective_logo_url:
+          nullable: true
+          type: string
+        effective_primary_color:
+          nullable: true
+          type: string
+        is_active:
+          title: Is Active
+          type: boolean
+        opening_hours:
+          additionalProperties: true
+          nullable: true
+          type: object
+        receipts_created_count:
+          title: Receipts Created Count
+          type: integer
+        last_receipt_created:
+          format: date-time
+          nullable: true
+          type: string
+        custom_metadata:
+          additionalProperties: true
+          nullable: true
+          type: object
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+      required:
+      - code
+      - country
+      - created_at
+      - effective_qr_expiry
+      - full_address
+      - id
+      - is_active
+      - name
+      - organisation_id
+      - receipts_created_count
+      - updated_at
+      title: StoreResponse
+    StoreStatsResponse:
+      description: Store statistics.
+      example:
+        store_id: store_id
+        store_name: store_name
+        receipts_created_count: 0
+        receipts_created_today: 6
+        receipts_created_this_month: 1
+        qr_scans_count: 5
+        qr_scans_today: 5
+        qr_scans_this_month: 2
+        total_amount_this_month: total_amount_this_month
+        average_receipt_amount: average_receipt_amount
+        last_receipt_created: 2000-01-23T04:56:07.000+00:00
+        busiest_hour: busiest_hour
+        busiest_day: busiest_day
+      properties:
+        store_id:
+          title: Store Id
+          type: string
+        store_name:
+          title: Store Name
+          type: string
+        receipts_created_count:
+          title: Receipts Created Count
+          type: integer
+        receipts_created_today:
+          title: Receipts Created Today
+          type: integer
+        receipts_created_this_month:
+          title: Receipts Created This Month
+          type: integer
+        qr_scans_count:
+          title: Qr Scans Count
+          type: integer
+        qr_scans_today:
+          title: Qr Scans Today
+          type: integer
+        qr_scans_this_month:
+          title: Qr Scans This Month
+          type: integer
+        total_amount_this_month:
+          title: Total Amount This Month
+          type: string
+        average_receipt_amount:
+          title: Average Receipt Amount
+          type: string
+        last_receipt_created:
+          format: date-time
+          nullable: true
+          type: string
+        busiest_hour:
+          nullable: true
+          type: string
+        busiest_day:
+          nullable: true
+          type: string
+      required:
+      - average_receipt_amount
+      - qr_scans_count
+      - qr_scans_this_month
+      - qr_scans_today
+      - receipts_created_count
+      - receipts_created_this_month
+      - receipts_created_today
+      - store_id
+      - store_name
+      - total_amount_this_month
+      title: StoreStatsResponse
+    StoreUpdate:
+      description: Store update request.
+      example:
+        name: name
+        description: description
+        address_line_1: address_line_1
+        address_line_2: address_line_2
+        city: city
+        state: state
+        postal_code: postal_code
+        country: country
+        latitude: latitude
+        longitude: longitude
+        phone: phone
+        email: email
+        manager_name: manager_name
+        timezone: timezone
+        default_qr_expiry_minutes: 116
+        logo_url: logo_url
+        primary_color: primary_color
+        is_active: true
+        opening_hours:
+          key: ""
+        custom_metadata:
+          key: ""
+      properties:
+        name:
+          maxLength: 255
+          minLength: 1
+          nullable: true
+          type: string
+        description:
+          maxLength: 1000
+          nullable: true
+          type: string
+        address_line_1:
+          maxLength: 255
+          nullable: true
+          type: string
+        address_line_2:
+          maxLength: 255
+          nullable: true
+          type: string
+        city:
+          maxLength: 100
+          nullable: true
+          type: string
+        state:
+          maxLength: 100
+          nullable: true
+          type: string
+        postal_code:
+          maxLength: 20
+          nullable: true
+          type: string
+        country:
+          maxLength: 2
+          nullable: true
+          type: string
+        latitude:
+          nullable: true
+          type: string
+        longitude:
+          nullable: true
+          type: string
+        phone:
+          nullable: true
+          type: string
+        email:
+          nullable: true
+          type: string
+        manager_name:
+          maxLength: 255
+          nullable: true
+          type: string
+        timezone:
+          nullable: true
+          type: string
+        default_qr_expiry_minutes:
+          maximum: 1440.0
+          minimum: 1.0
+          nullable: true
+          type: integer
+        logo_url:
+          nullable: true
+          type: string
+        primary_color:
+          nullable: true
+          type: string
+        is_active:
+          nullable: true
+          type: boolean
+        opening_hours:
+          additionalProperties: true
+          nullable: true
+          type: object
+        custom_metadata:
+          additionalProperties: true
+          nullable: true
+          type: object
+      title: StoreUpdate
+    TransactionReference:
+      description: "Receipt identifiers like auth code, ARN, invoice id."
+      example:
+        key: key
+        value: value
+      properties:
+        key:
+          maxLength: 100
+          minLength: 1
+          title: Key
+          type: string
+        value:
+          maxLength: 255
+          minLength: 1
+          title: Value
+          type: string
+      required:
+      - key
+      - value
+      title: TransactionReference
+    ValidationError:
+      example:
+        loc:
+        - Location_inner
+        - Location_inner
+        msg: msg
+        type: type
+        input: ""
+        ctx: "{}"
+      properties:
+        loc:
+          items:
+            $ref: "#/components/schemas/Location_inner"
+          title: Location
+          type: array
+          default: null
+        msg:
+          title: Message
+          type: string
+        type:
+          title: Error Type
+          type: string
+        input:
+          title: Input
+        ctx:
+          title: Context
+          type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    WarrantyInfo:
+      description: Warranty metadata for line-items/receipt.
+      example:
+        item_name: item_name
+        warranty_terms: warranty_terms
+        warranty_end_date: 2000-01-23T04:56:07.000+00:00
+        reference: reference
+      properties:
+        item_name:
+          maxLength: 255
+          nullable: true
+          type: string
+        warranty_terms:
+          maxLength: 500
+          nullable: true
+          type: string
+        warranty_end_date:
+          format: date-time
+          nullable: true
+          type: string
+        reference:
+          maxLength: 255
+          nullable: true
+          type: string
+      title: WarrantyInfo
+    Location_inner:
+      anyOf:
+      - type: string
+      - type: integer
+  securitySchemes:
+    ApiKeyAuth:
+      bearerFormat: API Key
+      description: "API key authentication for merchant endpoints. Format: `Bearer\
+        \ rcp_live_...`"
+      scheme: bearer
+      type: http
+x-tagGroups:
+- name: Merchant API
+  tags:
+  - Merchant Receipts
+  - Merchant Stores
+  - Merchant Assets
+
